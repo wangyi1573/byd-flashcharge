@@ -227,7 +227,7 @@ function renderSummary(data){
         <div class="card c1"><div class="ci">⚡</div><div class="value cu" data-t="${s.total_stations}">0</div><div class="label">站点总数</div><div class="delta">▲ ${s.new_stations_today} 今日新增</div></div>
         <div class="card c2"><div class="ci">🔌</div><div class="value cu" data-t="${s.total_flash_connectors||0}">0</div><div class="label">闪充桩总数</div></div>
         <div class="card c4"><div class="ci">🏙️</div><div class="value cu" data-t="${s.city_count}">0</div><div class="label">覆盖城市</div></div>
-        <div class="card c3"><div class="ci">🎯</div><div class="value" style="font-size:1.2rem;color:var(--pur)">${s.total_stations} / 20000</div><div class="label">2026目标</div><div class="delta" style="background:rgba(167,139,250,.1);color:var(--pur)">${(s.total_stations/200).toFixed(1)}%</div><div style="font-size:.7rem;color:var(--t3);margin-top:.4rem;line-height:1.4">站中站 18000 · 高速站 2000</div></div>`;
+        <div class="card c3"><div class="ci">🎯</div><div class="value" style="font-size:1.3rem;color:var(--pur)">${s.total_stations} / 20000</div><div class="label">2026目标</div><div style="font-size:.75rem;color:var(--t2);margin-top:.5rem;line-height:1.6">🏢 站中站 <span style="color:var(--ac)">${s.total_stations}</span> / 18000<br>🛣️ 高速站 <span style="color:var(--amb)">0</span> / 2000</div></div>`;
     document.querySelectorAll('.cu').forEach(el=>countUp(el,parseInt(el.dataset.t)||0));
 }
 
