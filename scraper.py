@@ -119,6 +119,17 @@ def run_full_scan():
         json.dump(list(all_stations.values()), f, ensure_ascii=False, indent=2)
     log.info(f"Raw data saved to {raw_path}")
 
+    # Geocode new stations (if API key available)
+    try:
+        from geocoder import AMAP_API_KEY, geocode_all_stations
+        if AMAP_API_KEY:
+            log.info("Running geocoding for new stations...")
+            geocode_all_stations()
+        else:
+            log.info("AMAP_API_KEY not set, skipping geocoding")
+    except Exception as e:
+        log.warning(f"Geocoding skipped: {e}")
+
     return all_stations
 
 
