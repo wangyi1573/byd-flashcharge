@@ -19,7 +19,10 @@
         .clock-bar .dot{width:6px;height:6px;border-radius:50%;background:var(--grn);animation:pulse 2s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
         .container{max-width:1440px;margin:0 auto;padding:1.5rem}
-        .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.5rem;align-items:stretch}
+        .cards-top{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.8rem}
+        .cards-bottom{display:flex;gap:1rem;margin-bottom:1.5rem}
+        .cards-bottom .card{flex:0 0 auto}
+        .cards-bottom .card-target{flex:1}
         .card{background:var(--card);border-radius:16px;padding:1.5rem;border:1px solid var(--bdr);transition:border-color .3s,transform .2s;display:flex;flex-direction:column;min-height:170px}
         .card:hover{border-color:var(--bdr-h);transform:translateY(-2px)}
         .card .card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:auto}
@@ -88,14 +91,18 @@
 
         /* Responsive: Tablet */
         @media(max-width:1024px){
-            .cards{grid-template-columns:repeat(2,1fr)}
+            .cards-top{grid-template-columns:1fr 1fr}
+            .cards-bottom{flex-wrap:wrap}
+            .cards-bottom .card{flex:1 1 45%}
             .g2,.gmc{grid-template-columns:1fr}
             .tstrip{grid-template-columns:1fr}
             .tab-bar{flex-wrap:wrap}
         }
         /* Responsive: Mobile */
         @media(max-width:640px){
-            .cards{grid-template-columns:repeat(2,1fr);gap:.6rem}
+            .cards-top{grid-template-columns:1fr 1fr;gap:.6rem}
+            .cards-bottom{gap:.6rem}
+            .cards-bottom .card{flex:1 1 100%}
             .card{padding:1rem;border-radius:12px;min-height:140px}
             .card .value{font-size:1.6rem}
             .card .ci{width:28px;height:28px;font-size:.9rem}
@@ -144,11 +151,13 @@
         </div>
     </div>
     <div class="container">
-        <div class="cards" id="summaryCards">
-            <div class="card" style="height:140px;opacity:.3"></div>
-            <div class="card" style="height:140px;opacity:.3"></div>
-            <div class="card" style="height:140px;opacity:.3"></div>
-            <div class="card" style="height:140px;opacity:.3"></div>
+        <div class="cards-top" id="cardsTop">
+            <div class="card" style="height:120px;opacity:.3"></div>
+            <div class="card" style="height:120px;opacity:.3"></div>
+        </div>
+        <div class="cards-bottom" id="cardsBottom">
+            <div class="card" style="height:120px;opacity:.3"></div>
+            <div class="card" style="height:120px;opacity:.3"></div>
         </div>
         <div class="stitle">站点类型分布</div>
         <div class="tstrip" id="typeGrid"></div>
@@ -238,9 +247,9 @@ async function loadData(){
 }
 
 function renderSummary(data){
-    if(!data.latest){document.getElementById('summaryCards').innerHTML='<div class="loading" style="grid-column:1/-1">暂无数据</div>';return;}
+    if(!data.latest){document.getElementById('cardsTop').innerHTML='<div class="loading" style="grid-column:1/-1">暂无数据</div>';return;}
     const s=data.latest;
-    document.getElementById('summaryCards').innerHTML=`
+    document.getElementById('cardsTop').innerHTML=`
         <div class="card c1">
             <div class="card-top"><div class="ci">⚡</div><div class="label-top">站点总数</div></div>
             <div class="card-body">
@@ -253,14 +262,15 @@ function renderSummary(data){
             <div class="card-body">
                 <div class="value cu" data-t="${s.total_flash_connectors||0}">0</div>
             </div>
-        </div>
+        </div>`;
+    document.getElementById('cardsBottom').innerHTML=`
         <div class="card c4">
             <div class="card-top"><div class="ci">🏙️</div><div class="label-top">覆盖城市</div></div>
             <div class="card-body">
                 <div class="value cu" data-t="${s.city_count}">0</div>
             </div>
         </div>
-        <div class="card c3">
+        <div class="card c3 card-target">
             <div class="card-top"><div class="ci">🎯</div><div class="label-top">2026 目标</div></div>
             <div class="card-body">
                 <div class="value" style="color:var(--pur)"><span class="cu" data-t="${s.total_stations}">0</span> <span style="font-size:1rem;color:var(--t3);font-weight:400">/ 20000</span></div>
