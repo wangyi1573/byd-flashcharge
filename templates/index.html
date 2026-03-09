@@ -305,7 +305,7 @@ function renderMap(cities){
         mapStations=stations;
         updateMap();
     }).catch(()=>{
-        mapChart.setOption({geo:{map:'china',roam:'move',zoom:1.2,
+        mapChart.setOption({geo:{map:'china',roam:true,zoom:1.2,
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f'},
             emphasis:{itemStyle:{areaColor:'#1a2744'}}}});
     });
@@ -321,7 +321,7 @@ function updateMap(){
     const points=filtered.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
     mapChart.setOption({
         tooltip:{trigger:'item',formatter:p=>p.name||''},
-        geo:{map:'china',roam:'move',zoom:1.2,
+        geo:{map:'china',roam:true,zoom:1.2,
             scaleLimit:{min:1,max:8},
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
             regions:[],
