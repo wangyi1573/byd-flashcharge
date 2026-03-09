@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>比亚迪闪充站 · 全国追踪</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/map/js/china.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2236;
+            --border: rgba(56,189,248,0.12);
+            --border-hover: rgba(56,189,248,0.3);
+            --accent: #38bdf8;
+            --accent-glow: rgba(56,189,248,0.15);
+            --green: #34d399;
+            --amber: #fbbf24;
+            --purple: #a78bfa;
+            --red: #f87171;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary); color: var(--text-primary);
+            min-height: 100vh; overflow-x: hidden;
+        }
+        /* Header */
+        .header {
+            position: relative; padding: 2.5rem 2rem 2rem;
+            text-align: center;
+            background: linear-gradient(180deg, rgba(56,189,248,0.06) 0%, transparent 100%);
+            border-bottom: 1px solid var(--border);
+        }
+        .header::before {
+            content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+            width: 400px; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        }
+        .header h1 {
+            font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .header h1 span { font-size: 1.5rem; }
+        .header-sub { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.4rem; }
+        .clock-bar {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            margin-top: 0.8rem; padding: 0.35rem 1rem;
+            background: rgba(56,189,248,0.08); border-radius: 20px;
+            border: 1px solid var(--border); font-size: 0.8rem; color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .clock-bar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .container { max-width: 1440px; margin: 0 auto; padding: 1.5rem; }
+
+        /* Summary Cards */
+        .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+        .card {
+            position: relative; background: var(--bg-card); border-radius: 16px; padding: 1.5rem;
+            border: 1px solid var(--border); overflow: hidden;
+            transition: border-color 0.3s, transform 0.2s;
+        }
+        .card:hover { border-color: var(--border-hover); transform: translateY(-2px); }
+        .card .card-icon {
+            width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center;
+            justify-content: center; font-size: 1.1rem; margin-bottom: 0.8rem;
+        }
+        .card .value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 2.2rem; font-weight: 700; line-height: 1;
+        }
+        .card .label { font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.4rem; }
+        .card .delta {
+            display: inline-flex; align-items: center; gap: 0.25rem;
+            font-size: 0.75rem; color: var(--green); margin-top: 0.5rem;
+            padding: 0.15rem 0.5rem; background: rgba(52,211,153,0.1);
+            border-radius: 12px;
+        }
+        .card-stations .card-icon { background: rgba(56,189,248,0.12); }
+        .card-stations .value { color: var(--accent); }
+        .card-connectors .card-icon { background: rgba(251,191,36,0.12); }
+        .card-connectors .value { color: var(--amber); }
+        .card-flash .card-icon { background: rgba(167,139,250,0.12); }
+        .card-flash .value { color: var(--purple); }
+        .card-cities .card-icon { background: rgba(52,211,153,0.12); }
+        .card-cities .value { color: var(--green); }
+
+        /* Section Title */
+        .section-title {
+            font-size: 1rem; font-weight: 600; color: var(--text-secondary);
+            margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;
+        }
+        .section-title::after {
+            content: ''; flex: 1; height: 1px; background: var(--border);
+        }
+
+        /* Tab bar */
+        .tab-bar {
+            display: flex; gap: 0.5rem; margin-bottom: 1.5rem;
+        }
+        .tab-btn {
+            padding: 0.5rem 1.2rem; border-radius: 8px; border: 1px solid var(--border);
+            background: transparent; color: var(--text-secondary); cursor: pointer;
+            font-size: 0.85rem; font-family: inherit; transition: all 0.2s;
+        }
+        .tab-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+        .tab-btn.active {
+            background: rgba(56,189,248,0.12); color: var(--accent);
+            border-color: rgba(56,189,248,0.4);
+        }
+
+        /* Type breakdown strip */
+        .type-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+        .type-chip {
+            background: var(--bg-card); border-radius: 12px; padding: 1rem 1.2rem;
+            border: 1px solid var(--border); display: flex; align-items: center; gap: 1rem;
+            transition: border-color 0.3s;
+        }
+        .type-chip:hover { border-color: var(--border-hover); }
+        .type-chip .tc-icon {
+            width: 42px; height: 42px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0;
+        }
+        .type-chip .tc-val { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; }
+        .type-chip .tc-label { font-size: 0.8rem; color: var(--text-secondary); }
+        .tc-normal .tc-icon { background: rgba(56,189,248,0.12); }
+        .tc-normal .tc-val { color: var(--accent); }
+        .tc-highway .tc-icon { background: rgba(251,191,36,0.12); }
+        .tc-highway .tc-val { color: var(--amber); }
+        .tc-nested .tc-icon { background: rgba(167,139,250,0.12); }
+        .tc-nested .tc-val { color: var(--purple); }
+
+        /* Grid layouts */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+        .grid-map-charts { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+        .grid-3-charts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+
+        /* Chart box */
+        .chart-box {
+            background: var(--bg-card); border-radius: 16px; padding: 1.5rem;
+            border: 1px solid var(--border);
+        }
+        .chart-box h3 {
+            font-size: 0.9rem; font-weight: 600; color: var(--text-secondary);
+            margin-bottom: 1rem; display: flex; align-items: center; gap: 0.4rem;
+        }
+        .chart-box h3 .dot-indicator {
+            width: 8px; height: 8px; border-radius: 50%;
+        }
+
+        /* Table */
+        .table-box {
+            background: var(--bg-card); border-radius: 16px; padding: 1.5rem;
+            border: 1px solid var(--border); margin-bottom: 1.5rem;
+        }
+        .table-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.8rem; }
+        .table-header h3 { font-size: 0.95rem; font-weight: 600; color: var(--text-secondary); }
+        .search-input {
+            padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);
+            background: var(--bg-primary); color: var(--text-primary); font-size: 0.85rem;
+            width: 240px; font-family: inherit; transition: border-color 0.2s;
+        }
+        .search-input:focus { outline: none; border-color: var(--accent); }
+        .search-input::placeholder { color: var(--text-muted); }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            padding: 0.6rem 0.8rem; text-align: left; font-size: 0.75rem; font-weight: 600;
+            color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
+            transition: color 0.2s;
+        }
+        th:hover { color: var(--accent); }
+        th.sorted-asc::after { content: ' ↑'; color: var(--accent); }
+        th.sorted-desc::after { content: ' ↓'; color: var(--accent); }
+        td { padding: 0.55rem 0.8rem; font-size: 0.88rem; border-bottom: 1px solid rgba(51,65,85,0.4); }
+        tr { transition: background 0.15s; }
+        tr:hover { background: var(--bg-card-hover); }
+        .rank {
+            font-family: 'JetBrains Mono', monospace; font-weight: 600;
+            color: var(--text-muted); font-size: 0.82rem;
+        }
+        .rank-top {
+            font-family: 'JetBrains Mono', monospace; font-weight: 700;
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 24px; height: 24px; border-radius: 6px; font-size: 0.78rem;
+        }
+        .rank-1 { background: rgba(251,191,36,0.15); color: #fbbf24; }
+        .rank-2 { background: rgba(148,163,184,0.15); color: #cbd5e1; }
+        .rank-3 { background: rgba(217,119,6,0.15); color: #f59e0b; }
+        .city-name { font-weight: 500; }
+        .num-highlight { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-primary); }
+
+        /* Footer */
+        .footer {
+            text-align: center; padding: 2rem; margin-top: 1rem;
+            border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.78rem;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 3rem; color: var(--text-muted); }
+        .skeleton { background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+            background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 8px; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .cards { grid-template-columns: repeat(2, 1fr); }
+            .grid-2, .grid-map-charts, .grid-3-charts { grid-template-columns: 1fr; }
+            .type-strip { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .cards { grid-template-columns: 1fr; }
+            .header h1 { font-size: 1.4rem; }
+            .container { padding: 1rem; }
+            .search-input { width: 100%; }
+            .table-header { flex-direction: column; align-items: stretch; }
+        }
+
+        /* CountUp transition */
+        .countup { transition: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span>⚡</span> 比亚迪闪充站 · 全国追踪</h1>
+        <div class="header-sub">实时监控全国闪充站部署进度</div>
+        <div class="clock-bar">
+            <div class="dot"></div>
+            <span id="liveClock">--</span>
+            <span>·</span>
+            <span id="updateTime">加载中...</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Summary Cards -->
+        <div class="cards" id="summaryCards">
+            <div class="card skeleton" style="height:140px"></div>
+            <div class="card skeleton" style="height:140px"></div>
+            <div class="card skeleton" style="height:140px"></div>
+            <div class="card skeleton" style="height:140px"></div>
+        </div>
+
+        <!-- Type Breakdown -->
+        <div class="section-title">站点类型分布</div>
+        <div class="type-strip" id="typeGrid"></div>
+
+        <!-- Tab filter -->
+        <div class="tab-bar" id="tabBar">
+            <button class="tab-btn active" data-type="all">全部站点</button>
+            <button class="tab-btn" data-type="普通站">普通站</button>
+            <button class="tab-btn" data-type="高速站">高速站</button>
+            <button class="tab-btn" data-type="站中站">站中站</button>
+        </div>
+
+        <!-- Map + Donut -->
+        <div class="grid-map-charts">
+            <div class="chart-box">
+                <h3><span class="dot-indicator" style="background:var(--accent)"></span> 全国站点热力分布</h3>
+                <div id="chinaMap" style="width:100%;height:460px;"></div>
+            </div>
+            <div class="chart-box">
+                <h3><span class="dot-indicator" style="background:var(--purple)"></span> 充电桩类型占比</h3>
+                <div id="donutChart" style="width:100%;height:460px;"></div>
+            </div>
+        </div>
+
+        <!-- Trend Charts -->
+        <div class="grid-2">
+            <div class="chart-box">
+                <h3><span class="dot-indicator" style="background:var(--accent)"></span> 站点增长趋势</h3>
+                <canvas id="stationChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <h3><span class="dot-indicator" style="background:var(--green)"></span> 每日新增站点</h3>
+                <canvas id="growthChart"></canvas>
+            </div>
+        </div>
+
+        <!-- City Table -->
+        <div class="table-box">
+            <div class="table-header">
+                <h3>🏙️ 各城市闪充站分布</h3>
+                <input type="text" class="search-input" id="citySearch" placeholder="🔍 搜索城市...">
+            </div>
+            <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-col="rank">#</th>
+                        <th data-col="city">城市</th>
+                        <th data-col="station_count">站点数</th>
+                        <th data-col="flash_connectors">闪充桩</th>
+                        <th data-col="fast_connectors">快充桩</th>
+                        <th data-col="slow_connectors">慢充桩</th>
+                        <th data-col="super_connectors">超充桩</th>
+                    </tr>
+                </thead>
+                <tbody id="cityTable">
+                    <tr><td colspan="7" class="loading">加载中...</td></tr>
+                </tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>比亚迪闪充站全国追踪 · 数据每日自动采集</p>
+        <p style="margin-top:0.3rem;">Powered by Flask + ECharts + Chart.js · <a href="https://github.com" target="_blank">GitHub</a></p>
+    </div>
+
+    <script>
+        // === State ===
+        let cityData = [];
+        let allStations = [];
+        let currentType = 'all';
+        let sortCol = 'station_count';
+        let sortDir = 'desc';
+
+        // === Live Clock ===
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('liveClock').textContent = now.toLocaleString('zh-CN', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+            });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // === CountUp Animation ===
+        function animateValue(el, target, duration = 1200) {
+            const start = 0;
+            const startTime = performance.now();
+            const format = (n) => n.toLocaleString('zh-CN');
+            function step(now) {
+                const progress = Math.min((now - startTime) / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+                el.textContent = format(Math.floor(eased * target));
+                if (progress < 1) requestAnimationFrame(step);
+            }
+            requestAnimationFrame(step);
+        }
+
+        // === Load All Data ===
+        async function loadData() {
+            try {
+                const [summary, cities, growth, stations] = await Promise.all([
+                    fetch('/api/summary').then(r => r.json()),
+                    fetch('/api/cities').then(r => r.json()),
+                    fetch('/api/growth').then(r => r.json()),
+                    fetch('/api/stations').then(r => r.json()).catch(() => []),
+                ]);
+
+                cityData = cities;
+                allStations = stations;
+                renderSummary(summary);
+                renderTypeBreakdown(summary.type_breakdown);
+                renderCityTable(cities);
+                renderTrendCharts(growth);
+                renderChinaMap(cities);
+                renderDonutChart(summary);
+
+                if (summary.latest) {
+                    document.getElementById('updateTime').textContent =
+                        `数据更新于 ${summary.latest.snapshot_date}`;
+                }
+            } catch (e) {
+                console.error('Failed to load:', e);
+                document.getElementById('summaryCards').innerHTML =
+                    '<div class="loading" style="grid-column:1/-1">数据加载失败，请刷新重试</div>';
+            }
+        }
+
+        // === Summary Cards ===
+        function renderSummary(data) {
+            if (!data.latest) {
+                document.getElementById('summaryCards').innerHTML =
+                    '<div class="loading" style="grid-column:1/-1">暂无数据，请先运行 scraper</div>';
+                return;
+            }
+            const s = data.latest;
+            const total = (s.total_flash_connectors||0) + (s.total_fast_connectors||0) +
+                          (s.total_slow_connectors||0) + (s.total_super_connectors||0);
+            document.getElementById('summaryCards').innerHTML = `
+                <div class="card card-stations">
+                    <div class="card-icon">⚡</div>
+                    <div class="value countup" data-target="${s.total_stations}">0</div>
+                    <div class="label">站点总数</div>
+                    <div class="delta">▲ ${s.new_stations_today} 今日新增</div>
+                </div>
+                <div class="card card-connectors">
+                    <div class="card-icon">🔌</div>
+                    <div class="value countup" data-target="${total}">0</div>
+                    <div class="label">充电桩总数</div>
+                </div>
+                <div class="card card-flash">
+                    <div class="card-icon">💜</div>
+                    <div class="value countup" data-target="${s.total_flash_connectors||0}">0</div>
+                    <div class="label">闪充桩</div>
+                </div>
+                <div class="card card-cities">
+                    <div class="card-icon">🏙️</div>
+                    <div class="value countup" data-target="${s.city_count}">0</div>
+                    <div class="label">覆盖城市</div>
+                </div>
+            `;
+            // Trigger countup
+            document.querySelectorAll('.countup').forEach(el => {
+                animateValue(el, parseInt(el.dataset.target) || 0);
+            });
+        }
+
+        // === Type Breakdown ===
+        function renderTypeBreakdown(types) {
+            if (!types || !types.length) return;
+            const icons = { '普通站': '🏢', '高速站': '🛣️', '站中站': '🔄' };
+            const cls = { '普通站': 'tc-normal', '高速站': 'tc-highway', '站中站': 'tc-nested' };
+            document.getElementById('typeGrid').innerHTML = types.map(t => `
+                <div class="type-chip ${cls[t.station_type] || 'tc-normal'}">
+                    <div class="tc-icon">${icons[t.station_type] || '📍'}</div>
+                    <div>
+                        <div class="tc-val countup" data-target="${t.count}">0</div>
+                        <div class="tc-label">${t.station_type}</div>
+                    </div>
+                </div>
+            `).join('');
+            document.querySelectorAll('#typeGrid .countup').forEach(el => {
+                animateValue(el, parseInt(el.dataset.target) || 0, 800);
+            });
+        }
+
+        // === China Map (ECharts) ===
+        function renderChinaMap(cities) {
+            const chart = echarts.init(document.getElementById('chinaMap'));
+            // Map city names to approximate map data
+            const mapData = cities.map(c => ({ name: c.city, value: c.station_count }));
+
+            chart.setOption({
+                tooltip: {
+                    trigger: 'item',
+                    formatter: p => p.name ? `${p.name}<br/>站点数: <b>${p.value || 0}</b>` : ''
+                },
+                visualMap: {
+                    min: 0, max: Math.max(...cities.map(c => c.station_count), 50),
+                    text: ['多', '少'], inRange: { color: ['#0c1445', '#1e40af', '#38bdf8', '#fbbf24'] },
+                    textStyle: { color: '#64748b' }, left: 20, bottom: 20,
+                },
+                geo: {
+                    map: 'china', roam: true,
+                    itemStyle: { areaColor: '#111827', borderColor: '#1e3a5f' },
+                    emphasis: { itemStyle: { areaColor: '#1e3a5f' }, label: { color: '#fff' } },
+                    label: { show: false },
+                },
+                series: [{
+                    type: 'scatter', coordinateSystem: 'geo',
+                    data: [], // scatter needs geo coords; fallback to effectScatter below
+                }, {
+                    type: 'map', map: 'china', geoIndex: 0,
+                    data: mapData,
+                }]
+            });
+            window.addEventListener('resize', () => chart.resize());
+        }
+
+        // === Donut Chart (ECharts) ===
+        function renderDonutChart(summary) {
+            const s = summary.latest;
+            if (!s) return;
+            const chart = echarts.init(document.getElementById('donutChart'));
+            chart.setOption({
+                tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                legend: {
+                    bottom: 10, textStyle: { color: '#94a3b8', fontSize: 12 },
+                    icon: 'circle', itemGap: 16
+                },
+                series: [{
+                    type: 'pie', radius: ['45%', '72%'], center: ['50%', '45%'],
+                    avoidLabelOverlap: true,
+                    itemStyle: { borderRadius: 6, borderColor: '#111827', borderWidth: 3 },
+                    label: { show: true, color: '#94a3b8', fontSize: 12, formatter: '{b}\n{d}%' },
+                    emphasis: {
+                        label: { show: true, fontSize: 14, fontWeight: 'bold' },
+                        itemStyle: { shadowBlur: 20, shadowColor: 'rgba(56,189,248,0.3)' }
+                    },
+                    data: [
+                        { value: s.total_flash_connectors || 0, name: '闪充桩', itemStyle: { color: '#a78bfa' } },
+                        { value: s.total_fast_connectors || 0, name: '快充桩', itemStyle: { color: '#38bdf8' } },
+                        { value: s.total_slow_connectors || 0, name: '慢充桩', itemStyle: { color: '#64748b' } },
+                        { value: s.total_super_connectors || 0, name: '超充桩', itemStyle: { color: '#fbbf24' } },
+                    ].filter(d => d.value > 0)
+                }]
+            });
+            window.addEventListener('resize', () => chart.resize());
+        }
+
+        // === Trend Charts (Chart.js) ===
+        function renderTrendCharts(growth) {
+            if (!growth.length) return;
+            const labels = growth.map(g => g.snapshot_date.slice(5)); // MM-DD
+
+            const commonScales = {
+                x: { ticks: { color: '#475569', font: { size: 11 } }, grid: { color: 'rgba(51,65,85,0.3)' }, border: { color: 'transparent' } },
+                y: { ticks: { color: '#475569', font: { size: 11 } }, grid: { color: 'rgba(51,65,85,0.3)' }, border: { color: 'transparent' } },
+            };
+
+            new Chart(document.getElementById('stationChart'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: '站点总数',
+                        data: growth.map(g => g.total_stations),
+                        borderColor: '#38bdf8', borderWidth: 2.5,
+                        backgroundColor: (ctx) => {
+                            const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 300);
+                            g.addColorStop(0, 'rgba(56,189,248,0.2)');
+                            g.addColorStop(1, 'rgba(56,189,248,0)');
+                            return g;
+                        },
+                        fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 5,
+                        pointHoverBackgroundColor: '#38bdf8',
+                    }]
+                },
+                options: {
+                    responsive: true, interaction: { intersect: false, mode: 'index
