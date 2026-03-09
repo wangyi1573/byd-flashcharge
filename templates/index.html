@@ -19,13 +19,27 @@
         .clock-bar .dot{width:6px;height:6px;border-radius:50%;background:var(--grn);animation:pulse 2s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
         .container{max-width:1440px;margin:0 auto;padding:1.5rem}
-        .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem}
-        .card{background:var(--card);border-radius:16px;padding:1.5rem;border:1px solid var(--bdr);transition:border-color .3s,transform .2s}
+        .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem;align-items:stretch}
+        .card{background:var(--card);border-radius:16px;padding:1.5rem;border:1px solid var(--bdr);transition:border-color .3s,transform .2s;display:flex;flex-direction:column;min-height:170px}
         .card:hover{border-color:var(--bdr-h);transform:translateY(-2px)}
-        .card .ci{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:.8rem}
+        .card .card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:auto}
+        .card .ci{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+        .card .label-top{font-size:.82rem;color:var(--t2)}
+        .card .card-body{margin-top:.8rem}
         .card .value{font-family:'JetBrains Mono',monospace;font-size:2.2rem;font-weight:700;line-height:1}
         .card .label{font-size:.82rem;color:var(--t2);margin-top:.4rem}
         .card .delta{display:inline-flex;align-items:center;gap:.25rem;font-size:.75rem;color:var(--grn);margin-top:.5rem;padding:.15rem .5rem;background:rgba(52,211,153,.1);border-radius:12px}
+        .card .mini-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.06);margin-top:.75rem;overflow:hidden}
+        .card .mini-bar-fill{height:100%;border-radius:2px;transition:width 1.2s ease}
+        .card .card-footer{margin-top:auto;padding-top:.5rem;font-size:.75rem;color:var(--t3)}
+        /* Progress bars for target card */
+        .target-row{display:flex;align-items:center;gap:.5rem;margin-top:.55rem;font-size:.78rem}
+        .target-row .tr-icon{flex-shrink:0;width:18px;text-align:center}
+        .target-row .tr-label{color:var(--t2);white-space:nowrap;min-width:42px}
+        .target-row .tr-bar{flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden}
+        .target-row .tr-bar-fill{height:100%;border-radius:3px;transition:width 1.2s ease}
+        .target-row .tr-num{font-family:'JetBrains Mono',monospace;color:var(--t2);font-size:.72rem;white-space:nowrap;min-width:70px;text-align:right}
+        .c4 .value{font-family:'JetBrains Mono',monospace;font-size:1.8rem;font-weight:700;line-height:1}
         .c1 .ci{background:rgba(56,189,248,.12)}.c1 .value{color:var(--ac)}
         .c2 .ci{background:rgba(251,191,36,.12)}.c2 .value{color:var(--amb)}
         .c3 .ci{background:rgba(167,139,250,.12)}.c3 .value{color:var(--pur)}
@@ -82,11 +96,15 @@
         /* Responsive: Mobile */
         @media(max-width:640px){
             .cards{grid-template-columns:repeat(2,1fr);gap:.6rem}
-            .card{padding:1rem;border-radius:12px}
+            .card{padding:1rem;border-radius:12px;min-height:140px}
             .card .value{font-size:1.6rem}
-            .card .ci{width:28px;height:28px;font-size:.9rem;margin-bottom:.5rem}
+            .card .ci{width:28px;height:28px;font-size:.9rem}
             .card .label{font-size:.75rem}
+            .card .label-top{font-size:.75rem}
             .card .delta{font-size:.7rem}
+            .c4 .value{font-size:1.3rem}
+            .target-row{font-size:.7rem;margin-top:.4rem}
+            .target-row .tr-num{font-size:.65rem;min-width:55px}
             .header{padding:1.5rem 1rem 1.2rem}
             .header h1{font-size:1.3rem}
             .header-sub{font-size:.75rem}
@@ -223,11 +241,55 @@ async function loadData(){
 function renderSummary(data){
     if(!data.latest){document.getElementById('summaryCards').innerHTML='<div class="loading" style="grid-column:1/-1">暂无数据</div>';return;}
     const s=data.latest;
+    const pctTotal=Math.min((s.total_stations/20000)*100,100).toFixed(1);
+    const pctZzz=Math.min((s.total_stations/18000)*100,100).toFixed(1);
+    const pctGs=0;
+    // Estimate avg connectors per station for card 2
+    const avgConn=s.total_stations>0?((s.total_flash_connectors||0)/s.total_stations).toFixed(1):'--';
     document.getElementById('summaryCards').innerHTML=`
-        <div class="card c1"><div class="ci">⚡</div><div class="value cu" data-t="${s.total_stations}">0</div><div class="label">站点总数</div><div class="delta">▲ ${s.new_stations_today} 今日新增</div></div>
-        <div class="card c2"><div class="ci">🔌</div><div class="value cu" data-t="${s.total_flash_connectors||0}">0</div><div class="label">闪充桩总数</div></div>
-        <div class="card c4"><div class="ci">🏙️</div><div class="value cu" data-t="${s.city_count}">0</div><div class="label">覆盖城市</div></div>
-        <div class="card c3"><div class="ci">🎯</div><div class="value" style="font-size:1.3rem;color:var(--pur)">${s.total_stations} / 20000</div><div class="label">2026目标</div><div style="font-size:.75rem;color:var(--t2);margin-top:.5rem;line-height:1.6">🏢 站中站 <span style="color:var(--ac)">${s.total_stations}</span> / 18000<br>🛣️ 高速站 <span style="color:var(--amb)">0</span> / 2000</div></div>`;
+        <div class="card c1">
+            <div class="card-top"><div class="ci">⚡</div><div class="label-top">站点总数</div></div>
+            <div class="card-body">
+                <div class="value cu" data-t="${s.total_stations}">0</div>
+                <div class="delta">▲ ${s.new_stations_today} 今日新增</div>
+            </div>
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:${pctTotal}%;background:var(--ac)"></div></div>
+            <div class="card-footer">目标进度 ${pctTotal}%</div>
+        </div>
+        <div class="card c2">
+            <div class="card-top"><div class="ci">🔌</div><div class="label-top">闪充桩总数</div></div>
+            <div class="card-body">
+                <div class="value cu" data-t="${s.total_flash_connectors||0}">0</div>
+                <div class="delta" style="color:var(--amb);background:rgba(251,191,36,.1)">⌀ ${avgConn} 桩/站</div>
+            </div>
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:100%;background:var(--amb)"></div></div>
+            <div class="card-footer">平均每站闪充桩数</div>
+        </div>
+        <div class="card c4">
+            <div class="card-top"><div class="ci">🏙️</div><div class="label-top">覆盖城市</div></div>
+            <div class="card-body">
+                <div class="value cu" data-t="${s.city_count}">0</div>
+                <div class="delta" style="color:var(--grn);background:rgba(52,211,153,.1)">📍 全国布局</div>
+            </div>
+            <div class="mini-bar"><div class="mini-bar-fill" style="width:${Math.min(s.city_count/350*100,100).toFixed(0)}%;background:var(--grn)"></div></div>
+            <div class="card-footer">全国地级市覆盖</div>
+        </div>
+        <div class="card c3">
+            <div class="card-top"><div class="ci">🎯</div><div class="label-top">2026 目标</div></div>
+            <div class="card-body">
+                <div class="value" style="color:var(--pur)"><span class="cu" data-t="${s.total_stations}">0</span> <span style="font-size:1rem;color:var(--t3);font-weight:400">/ 20000</span></div>
+            </div>
+            <div class="target-row">
+                <span class="tr-icon">🏢</span><span class="tr-label">站中站</span>
+                <div class="tr-bar"><div class="tr-bar-fill" style="width:${pctZzz}%;background:var(--ac)"></div></div>
+                <span class="tr-num">${s.total_stations} / 18000</span>
+            </div>
+            <div class="target-row">
+                <span class="tr-icon">🛣️</span><span class="tr-label">高速站</span>
+                <div class="tr-bar"><div class="tr-bar-fill" style="width:${pctGs}%;background:var(--amb)"></div></div>
+                <span class="tr-num">0 / 2000</span>
+            </div>
+        </div>`;
     document.querySelectorAll('.cu').forEach(el=>countUp(el,parseInt(el.dataset.t)||0));
 }
 
