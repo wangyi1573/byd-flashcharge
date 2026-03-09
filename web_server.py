@@ -33,8 +33,7 @@ def api_summary():
             SELECT
                 CASE
                     WHEN attribute_tags LIKE '%高速%' THEN '高速站'
-                    WHEN attribute_tags LIKE '%站中站%' THEN '站中站'
-                    ELSE '普通站'
+                    ELSE '站中站'
                 END as station_type,
                 COUNT(*) as count
             FROM stations

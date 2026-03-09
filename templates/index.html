@@ -270,8 +270,8 @@ function renderSummary(data){
 
 function renderTypeBreakdown(types){
     if(!types||!types.length)return;
-    const ic={'普通站':'🏢','高速站':'🛣️','站中站':'🔄'};
-    const cl={'普通站':'tn','高速站':'th','站中站':'ts'};
+    const ic={'站中站':'🏢','高速站':'🛣️'};
+    const cl={'站中站':'ts','高速站':'th'};
     document.getElementById('typeGrid').innerHTML=types.map(t=>`
         <div class="tchip ${cl[t.station_type]||'tn'}"><div class="ti">${ic[t.station_type]||'📍'}</div>
         <div><div class="tv cu" data-t="${t.count}">0</div><div class="tl">${t.station_type}</div></div></div>`).join('');
