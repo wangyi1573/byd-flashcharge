@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>比亚迪闪充站 · 全国追踪</title>
-    <script src="/static/chart.js"></script>
-    <script src="/static/echarts.min.js"></script>
-    <script src="/static/china.js"></script>
+    <script src="./static/chart.js"></script>
+    <script src="./static/echarts.min.js"></script>
+    <script src="./static/china.js"></script>
     <style>
         :root{--bg:#0a0e1a;--card:#111827;--card-h:#1a2236;--bdr:rgba(56,189,248,.12);--bdr-h:rgba(56,189,248,.3);--ac:#38bdf8;--grn:#34d399;--amb:#fbbf24;--pur:#a78bfa;--t1:#f1f5f9;--t2:#94a3b8;--t3:#64748b}
         *{margin:0;padding:0;box-sizing:border-box}
@@ -202,7 +202,7 @@
     </div>
     <div class="footer">
         <p>比亚迪闪充站全国追踪 · 数据每日自动采集</p>
-        <p style="margin-top:.3rem">Powered by Flask + ECharts + Chart.js</p>
+        <p style="margin-top:.3rem">Powered by Cloudflare Pages + ECharts + Chart.js</p>
     </div>
 
 <script>
@@ -230,10 +230,10 @@ function countUp(el,target,dur){
 async function loadData(){
     try{
         const [summary,cities,growth,stations]=await Promise.all([
-            fetch('/api/summary').then(r=>r.json()),
-            fetch('/api/cities').then(r=>r.json()),
-            fetch('/api/growth').then(r=>r.json()),
-            fetch('/api/stations').then(r=>r.json()).catch(()=>[]),
+            fetch('./api/summary.json').then(r=>r.json()),
+            fetch('./api/cities.json').then(r=>r.json()),
+            fetch('./api/growth.json').then(r=>r.json()),
+            fetch('./api/stations.json').then(r=>r.json()).catch(()=>[]),
         ]);
         cityData=cities; allStations=stations;
         renderSummary(summary);
@@ -286,7 +286,7 @@ let mapChart=null, mapStations=[];
 
 function renderMap(cities){
     mapChart=echarts.init(document.getElementById('chinaMap'));
-    fetch('/api/stations').then(r=>r.json()).then(stations=>{
+    fetch('./api/stations.json').then(r=>r.json()).then(stations=>{
         mapStations=stations;
         updateMap();
     }).catch(()=>{

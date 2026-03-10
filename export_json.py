@@ -1,0 +1,102 @@
+"""Export SQLite data to static JSON files for Cloudflare Pages deployment."""
+
+import json
+import os
+from datetime import date
+from database import get_db, get_city_stats, get_summary_history
+
+OUTPUT_DIR = os.path.join("public", "api")
+
+
+def export_summary(conn, today):
+    latest = conn.execute(
+        "SELECT * FROM daily_summary ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+
+    history = get_summary_history(conn, 90)
+
+    snapshot_date = latest["snapshot_date"] if latest else today
+    type_stats = conn.execute("""
+        SELECT
+            CASE
+                WHEN attribute_tags LIKE '%高速%' THEN '高速站'
+                ELSE '站中站'
+            END as station_type,
+            COUNT(*) as count
+        FROM stations
+        WHERE last_seen = ?
+        GROUP BY station_type
+    """, (snapshot_date,)).fetchall()
+
+    return {
+        "latest": dict(latest) if latest else None,
+        "history": [dict(h) for h in history],
+        "type_breakdown": [dict(t) for t in type_stats],
+    }
+
+
+def export_cities(conn, today):
+    latest = conn.execute(
+        "SELECT snapshot_date FROM daily_summary ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+    snapshot_date = latest["snapshot_date"] if latest else today
+    cities = get_city_stats(conn, snapshot_date)
+    return [dict(c) for c in cities]
+
+
+def export_stations(conn, today):
+    latest = conn.execute(
+        "SELECT snapshot_date FROM daily_summary ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+    snapshot_date = latest["snapshot_date"] if latest else today
+
+    stations = conn.execute("""
+        SELECT id, station_name, address, lat, lng,
+               flash_charge_num, fast_charge_num, slow_charge_num, super_charge_num,
+               service_tags, attribute_tags, first_seen, last_seen
+        FROM stations
+        WHERE last_seen = ?
+        ORDER BY station_name
+    """, (snapshot_date,)).fetchall()
+
+    return [dict(s) for s in stations]
+
+
+def export_growth(conn):
+    data = conn.execute("""
+        SELECT snapshot_date, total_stations, new_stations_today,
+               total_flash_connectors, total_fast_connectors,
+               total_slow_connectors, total_super_connectors,
+               city_count
+        FROM daily_summary
+        ORDER BY snapshot_date
+    """).fetchall()
+    return [dict(d) for d in data]
+
+
+def write_json(filename, data):
+    path = os.path.join(OUTPUT_DIR, filename)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    size = os.path.getsize(path)
+    print(f"  {filename}: {size:,} bytes")
+
+
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    today = date.today().isoformat()
+
+    conn = get_db()
+    try:
+        print("Exporting JSON to public/api/ ...")
+        write_json("summary.json", export_summary(conn, today))
+        write_json("cities.json", export_cities(conn, today))
+        write_json("stations.json", export_stations(conn, today))
+        write_json("growth.json", export_growth(conn))
+        print("Done!")
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()
