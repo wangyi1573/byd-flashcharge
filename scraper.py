@@ -1,11 +1,13 @@
 """Scraper for BYD Flash Charge stations - scans all of China via grid."""
 
 import json
+import os
 import time
 import requests
 import logging
 from datetime import date
-from config import API_URL, REQUEST_HEADERS, REQUEST_TEMPLATE, SCAN_GRID, REQUEST_DELAY
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from config import API_URL, REQUEST_HEADERS, REQUEST_TEMPLATE, SCAN_GRID, CONCURRENT_WORKERS
 from cities import MAJOR_CITIES
 from database import init_db, get_db, upsert_station, insert_daily_snapshot, update_daily_summary
 
@@ -54,13 +56,6 @@ def fetch_stations(lat: float, lng: float) -> list:
             return []
 
         respond_data = json.loads(inner.get("respondData", "{}"))
-
-        # Log pagination info on first call to help diagnose coverage gaps
-        extra_keys = {k for k in respond_data if k != "rows"}
-        if extra_keys:
-            log.info(f"API respondData extra keys: {extra_keys} (total={respond_data.get('total', '?')}, "
-                     f"hasMore={respond_data.get('hasMore', '?')}, pageSize={respond_data.get('pageSize', '?')})")
-
         return respond_data.get("rows", [])
 
     except Exception as e:
@@ -68,83 +63,77 @@ def fetch_stations(lat: float, lng: float) -> list:
         return []
 
 
+def batch_fetch(coords, label=""):
+    """Fetch stations for a list of coordinates concurrently. Returns {id: station}."""
+    results = {}
+    total = len(coords)
+
+    with ThreadPoolExecutor(max_workers=CONCURRENT_WORKERS) as executor:
+        future_to_coord = {
+            executor.submit(fetch_stations, lat, lng): (lat, lng)
+            for lat, lng in coords
+        }
+        done = 0
+        for future in as_completed(future_to_coord):
+            done += 1
+            stations = future.result()
+            for s in stations:
+                results[s["id"]] = s
+            if done % 100 == 0 and label:
+                log.info(f"  {label}: {done}/{total} done, {len(results)} unique so far")
+
+    return results
+
+
 def run_full_scan():
     """Scan major cities first, then grid for full coverage."""
-    import os
     os.makedirs("data", exist_ok=True)
 
     init_db()
     today = date.today().isoformat()
     all_stations = {}
+    t_start = time.time()
 
     # Phase 1: Major cities (fast, covers most stations)
-    log.info(f"Phase 1: Scanning {len(MAJOR_CITIES)} major cities, date={today}")
-    for i, (lat, lng, name) in enumerate(MAJOR_CITIES):
-        stations = fetch_stations(lat, lng)
-        new_count = sum(1 for s in stations if s["id"] not in all_stations)
-        for s in stations:
-            all_stations[s["id"]] = s
-        if stations:
-            log.info(f"[{i+1}/{len(MAJOR_CITIES)}] {name} ({lat:.2f}, {lng:.2f}) -> {len(stations)} found, {new_count} new | Total: {len(all_stations)}")
-        time.sleep(REQUEST_DELAY)
-
-    log.info(f"Phase 1 done: {len(all_stations)} unique stations from major cities")
+    log.info(f"Phase 1: Scanning {len(MAJOR_CITIES)} major cities ({CONCURRENT_WORKERS} workers)")
+    city_coords = [(lat, lng) for lat, lng, _ in MAJOR_CITIES]
+    city_results = batch_fetch(city_coords, "Cities")
+    all_stations.update(city_results)
+    log.info(f"Phase 1 done: {len(all_stations)} unique stations ({time.time()-t_start:.0f}s)")
 
     # Phase 1b: Dense offset scans for large cities (cover suburbs)
-    tier1_count = sum(1 for _, _, n in MAJOR_CITIES if n in TIER1_CITIES)
-    tier2_count = sum(1 for _, _, n in MAJOR_CITIES if n in TIER2_CITIES)
-    log.info(f"Phase 1b: Offset scans for {tier1_count} tier-1 + {tier2_count} tier-2 cities")
-    offset_new = 0
+    offset_coords = []
     for lat, lng, name in MAJOR_CITIES:
         if name in TIER1_CITIES:
-            radii = [0.3, 0.5]
+            radii, dirs = [0.3, 0.5], _8DIR
         elif name in TIER2_CITIES:
-            radii = [0.3]
+            radii, dirs = [0.3], _8DIR
         else:
-            continue
+            radii, dirs = [0.2], [(1, 0), (-1, 0), (0, 1), (0, -1)]
         for r in radii:
-            for dlat, dlng in _8DIR:
-                stations = fetch_stations(lat + dlat * r, lng + dlng * r)
-                new_count = sum(1 for s in stations if s["id"] not in all_stations)
-                for s in stations:
-                    all_stations[s["id"]] = s
-                offset_new += new_count
-                time.sleep(REQUEST_DELAY)
-        if name in TIER1_CITIES:
-            log.info(f"  {name}: offset scans done | Total: {len(all_stations)}")
-    log.info(f"Phase 1b done: +{offset_new} new stations from offset scans | Total: {len(all_stations)}")
+            for dlat, dlng in dirs:
+                offset_coords.append((lat + dlat * r, lng + dlng * r))
 
-    # Phase 2: Grid scan for remaining areas (skip points near already-scanned cities)
-    log.info(f"Phase 2: Grid scan ({len(SCAN_GRID)} points) for coverage gaps")
-    scanned = 0
-    skipped = 0
-    for i, (lat, lng) in enumerate(SCAN_GRID):
-        # Skip if close to a major city already scanned
-        too_close = False
-        for clat, clng, _ in MAJOR_CITIES:
-            if abs(lat - clat) < 0.5 and abs(lng - clng) < 0.7:
-                too_close = True
-                break
-        if too_close:
-            skipped += 1
-            continue
+    log.info(f"Phase 1b: {len(offset_coords)} offset scans for tier-1/tier-2 cities")
+    t1b = time.time()
+    offset_results = batch_fetch(offset_coords, "Offsets")
+    new_from_offset = sum(1 for sid in offset_results if sid not in all_stations)
+    all_stations.update(offset_results)
+    log.info(f"Phase 1b done: +{new_from_offset} new stations ({time.time()-t1b:.0f}s) | Total: {len(all_stations)}")
 
-        stations = fetch_stations(lat, lng)
-        scanned += 1
-        new_count = sum(1 for s in stations if s["id"] not in all_stations)
-        for s in stations:
-            all_stations[s["id"]] = s
+    # Phase 2: Grid scan for full coverage
+    grid_coords = list(SCAN_GRID)
 
-        if new_count > 0:
-            log.info(f"[Grid {scanned}] ({lat:.2f}, {lng:.2f}) -> {new_count} new stations | Total: {len(all_stations)}")
-
-        if scanned % 100 == 0:
-            log.info(f"Grid progress: {scanned} scanned, {skipped} skipped, total stations: {len(all_stations)}")
-
-        time.sleep(REQUEST_DELAY)
+    log.info(f"Phase 2: {len(grid_coords)} grid points")
+    t2 = time.time()
+    grid_results = batch_fetch(grid_coords, "Grid")
+    new_from_grid = sum(1 for sid in grid_results if sid not in all_stations)
+    all_stations.update(grid_results)
+    log.info(f"Phase 2 done: +{new_from_grid} new stations ({time.time()-t2:.0f}s) | Total: {len(all_stations)}")
 
     # Save to database
-    log.info(f"Scan complete. Total unique stations: {len(all_stations)}")
+    elapsed = time.time() - t_start
+    log.info(f"Scan complete: {len(all_stations)} stations in {elapsed:.0f}s")
     log.info("Saving to database...")
 
     conn = get_db()
