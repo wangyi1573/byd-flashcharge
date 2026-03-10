@@ -11,6 +11,7 @@ from config import API_URL, REQUEST_HEADERS, REQUEST_TEMPLATE, SCAN_GRID, CONCUR
 from cities import MAJOR_CITIES
 from database import init_db, get_db, upsert_station, insert_daily_snapshot, update_daily_summary
 
+os.makedirs("data", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -87,8 +88,6 @@ def batch_fetch(coords, label=""):
 
 def run_full_scan():
     """Scan major cities first, then grid for full coverage."""
-    os.makedirs("data", exist_ok=True)
-
     init_db()
     today = date.today().isoformat()
     all_stations = {}
