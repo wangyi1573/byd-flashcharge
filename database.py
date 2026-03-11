@@ -1,11 +1,9 @@
 """Database module for BYD Flash Charge Station Tracker"""
 
-import re
 import sqlite3
 import os
-from datetime import datetime, date
+from datetime import date
 from config import DB_PATH, DATA_DIR
-from cities import CITY_NAMES, DISTRICT_TO_CITY
 
 
 def get_db():
@@ -16,51 +14,6 @@ def get_db():
     return conn
 
 
-# Brand prefixes to strip before city matching
-_BRAND_PREFIXES = ("比亚迪", "腾势", "方程豹汽车", "方程豹", "仰望", "领汇")
-# Pre-compiled pattern: extract content inside 闪充(...) with full/half-width parens
-_PAREN_RE = re.compile(r"闪充[（(](.+?)[）)]")
-
-
-def extract_city_from_name(station_name: str) -> str:
-    """Extract city name from station_name like '闪充(比亚迪深圳宝安4S店)充电站'.
-
-    Algorithm:
-    1. Extract content inside 闪充(...) parentheses
-    2. Strip brand prefix (比亚迪/腾势/方程豹/仰望/领汇)
-    3. Longest-match against CITY_NAMES from the start of remaining text
-    4. Fallback: try DISTRICT_TO_CITY mapping on leading 2-3 chars
-    """
-    if not station_name:
-        return ""
-
-    m = _PAREN_RE.search(station_name)
-    if not m:
-        return ""
-
-    inner = m.group(1)
-
-    # Strip brand prefix
-    for prefix in _BRAND_PREFIXES:
-        if inner.startswith(prefix):
-            inner = inner[len(prefix):]
-            break
-
-    # Longest-match city from start of text (CITY_NAMES is sorted longest-first)
-    for city in CITY_NAMES:
-        if inner.startswith(city):
-            return city
-
-    # Fallback: district → city mapping (try 5-char down to 2-char)
-    for length in (5, 4, 3, 2):
-        if len(inner) >= length:
-            district = inner[:length]
-            if district in DISTRICT_TO_CITY:
-                return DISTRICT_TO_CITY[district]
-
-    return ""
-
-
 def init_db():
     conn = get_db()
     conn.executescript("""
@@ -68,6 +21,9 @@ def init_db():
             id INTEGER PRIMARY KEY,
             station_name TEXT,
             address TEXT,
+            city TEXT,
+            province TEXT,
+            geocoded INTEGER DEFAULT 0,
             lat REAL,
             lng REAL,
             operator_name TEXT,
@@ -116,27 +72,30 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_snapshot_date ON daily_snapshots(snapshot_date);
     """)
     conn.commit()
+
+    # Migrate existing DBs: add province and geocoded columns if missing
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(stations)").fetchall()}
+    if "province" not in cols:
+        conn.execute("ALTER TABLE stations ADD COLUMN province TEXT")
+    if "geocoded" not in cols:
+        conn.execute("ALTER TABLE stations ADD COLUMN geocoded INTEGER DEFAULT 0")
+    conn.commit()
     conn.close()
 
 
 def upsert_station(conn, station: dict, today: str):
-    """Insert or update a station record."""
+    """Insert or update a station record. City/province set by geocoder later."""
     existing = conn.execute("SELECT first_seen FROM stations WHERE id = ?", (station["id"],)).fetchone()
     first_seen = existing["first_seen"] if existing else today
 
-    # Auto-extract city from station name if not already set
-    station_name = station.get("stationName", "")
-    city = extract_city_from_name(station_name)
-
     conn.execute("""
-        INSERT INTO stations (id, station_name, address, city, lat, lng, operator_name, operator_id,
+        INSERT INTO stations (id, station_name, address, lat, lng, operator_name, operator_id,
             operator_station_id, flash_charge_num, fast_charge_num, slow_charge_num, super_charge_num,
             flash_charge, byd_self_support, service_tags, attribute_tags, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             station_name=excluded.station_name,
             address=excluded.address,
-            city=COALESCE(NULLIF(excluded.city, ''), stations.city),
             lat=excluded.lat,
             lng=excluded.lng,
             flash_charge_num=excluded.flash_charge_num,
@@ -151,7 +110,6 @@ def upsert_station(conn, station: dict, today: str):
         station["id"],
         station.get("stationName", ""),
         station.get("address", ""),
-        city,
         station.get("stationLat", 0),
         station.get("stationLng", 0),
         station.get("operatorName", ""),
@@ -194,7 +152,7 @@ def insert_daily_snapshot(conn, station: dict, today: str):
 
 
 def update_daily_summary(conn, today: str):
-    """Calculate and store daily summary."""
+    """Calculate and store daily summary (cumulative, never decreasing)."""
     row = conn.execute("""
         SELECT
             COUNT(*) as total_stations,
@@ -202,18 +160,22 @@ def update_daily_summary(conn, today: str):
             SUM(fast_charge_num) as total_fast,
             SUM(slow_charge_num) as total_slow,
             SUM(super_charge_num) as total_super
-        FROM stations WHERE last_seen = ?
+        FROM stations
+    """).fetchone()
+
+    # New = today's total - yesterday's total
+    prev = conn.execute("""
+        SELECT total_stations FROM daily_summary
+        WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1
     """, (today,)).fetchone()
+    new_count = row["total_stations"] - (prev["total_stations"] if prev else 0)
+    if new_count < 0:
+        new_count = 0
 
-    new_count = conn.execute(
-        "SELECT COUNT(*) as c FROM stations WHERE first_seen = ?", (today,)
-    ).fetchone()["c"]
-
-    # Count unique cities
     city_count = conn.execute("""
         SELECT COUNT(DISTINCT city) FROM stations
-        WHERE last_seen = ? AND city IS NOT NULL AND city != ''
-    """, (today,)).fetchone()[0]
+        WHERE city IS NOT NULL AND city != ''
+    """).fetchone()[0]
 
     conn.execute("""
         INSERT OR REPLACE INTO daily_summary
@@ -233,9 +195,7 @@ def update_daily_summary(conn, today: str):
 
 
 def get_city_stats(conn, snapshot_date: str = None):
-    """Get station counts grouped by city."""
-    if not snapshot_date:
-        snapshot_date = date.today().isoformat()
+    """Get station counts grouped by city (cumulative, all stations ever seen)."""
     return conn.execute("""
         SELECT
             COALESCE(NULLIF(city, ''), '未知') as city,
@@ -245,10 +205,9 @@ def get_city_stats(conn, snapshot_date: str = None):
             SUM(slow_charge_num) as slow_connectors,
             SUM(super_charge_num) as super_connectors
         FROM stations
-        WHERE last_seen = ?
         GROUP BY city
         ORDER BY station_count DESC
-    """, (snapshot_date,)).fetchall()
+    """).fetchall()
 
 
 def get_summary_history(conn, days: int = 30):

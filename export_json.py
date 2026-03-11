@@ -24,9 +24,8 @@ def export_summary(conn, today):
             END as station_type,
             COUNT(*) as count
         FROM stations
-        WHERE last_seen = ?
         GROUP BY station_type
-    """, (snapshot_date,)).fetchall()
+    """).fetchall()
 
     return {
         "latest": dict(latest) if latest else None,
@@ -45,19 +44,13 @@ def export_cities(conn, today):
 
 
 def export_stations(conn, today):
-    latest = conn.execute(
-        "SELECT snapshot_date FROM daily_summary ORDER BY snapshot_date DESC LIMIT 1"
-    ).fetchone()
-    snapshot_date = latest["snapshot_date"] if latest else today
-
     stations = conn.execute("""
-        SELECT id, station_name, address, lat, lng,
+        SELECT id, station_name, address, province, city, lat, lng,
                flash_charge_num, fast_charge_num, slow_charge_num, super_charge_num,
                service_tags, attribute_tags, first_seen, last_seen
         FROM stations
-        WHERE last_seen = ?
         ORDER BY station_name
-    """, (snapshot_date,)).fetchall()
+    """).fetchall()
 
     return [dict(s) for s in stations]
 

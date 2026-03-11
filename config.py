@@ -62,6 +62,9 @@ while lat <= lat_end:
         lng += lng_step
     lat += lat_step
 
+# Amap (高德地图) reverse geocoding
+AMAP_API_KEY = "eec97f01beba5127aaf51661d72b92d3"
+
 # Database
 DB_PATH = "data/stations.db"
 DATA_DIR = "data"

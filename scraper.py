@@ -3,6 +3,7 @@
 import json
 import os
 import time
+import ssl
 import requests
 import logging
 from datetime import date
@@ -10,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import API_URL, REQUEST_HEADERS, REQUEST_TEMPLATE, SCAN_GRID, CONCURRENT_WORKERS
 from cities import MAJOR_CITIES
 from database import init_db, get_db, upsert_station, insert_daily_snapshot, update_daily_summary
+from geocoder import geocode_pending_stations
 
 os.makedirs("data", exist_ok=True)
 logging.basicConfig(
@@ -38,7 +40,7 @@ _8DIR = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
 
 
 def fetch_stations(lat: float, lng: float) -> list:
-    """Fetch stations near a given coordinate."""
+    """Fetch stations near a given coordinate with retry on transient errors."""
     req_data = REQUEST_TEMPLATE.copy()
     req_data["lat"] = lat
     req_data["lng"] = lng
@@ -46,22 +48,37 @@ def fetch_stations(lat: float, lng: float) -> list:
 
     payload = {"request": json.dumps(req_data)}
 
-    try:
-        resp = requests.post(API_URL, json=payload, headers=REQUEST_HEADERS, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(API_URL, json=payload, headers=REQUEST_HEADERS, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
 
-        inner = json.loads(data.get("response", "{}"))
-        if inner.get("code") != "0":
-            log.warning(f"API error at ({lat}, {lng}): {inner.get('message')}")
+            inner = json.loads(data.get("response", "{}"))
+            if inner.get("code") != "0":
+                log.warning(f"API error at ({lat}, {lng}): {inner.get('message')}")
+                return []
+
+            respond_data = json.loads(inner.get("respondData", "{}"))
+            return respond_data.get("rows", [])
+
+        except (ssl.SSLError, requests.exceptions.SSLError,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                log.warning(f"Retry {attempt+1}/{max_retries} at ({lat}, {lng}): {e}")
+                time.sleep(wait)
+            else:
+                log.error(f"All {max_retries} retries failed at ({lat}, {lng}): {e}")
+                return []
+
+        except Exception as e:
+            log.error(f"Request failed at ({lat}, {lng}): {e}")
             return []
 
-        respond_data = json.loads(inner.get("respondData", "{}"))
-        return respond_data.get("rows", [])
-
-    except Exception as e:
-        log.error(f"Request failed at ({lat}, {lng}): {e}")
-        return []
+    return []
 
 
 def batch_fetch(coords, label=""):
@@ -140,9 +157,13 @@ def run_full_scan():
         for station in all_stations.values():
             upsert_station(conn, station, today)
             insert_daily_snapshot(conn, station, today)
+        conn.commit()
+        log.info("Database updated. Running geocoder...")
+
+        geocode_pending_stations(conn)
         update_daily_summary(conn, today)
         conn.commit()
-        log.info("Database updated successfully.")
+        log.info("Geocoding and summary complete.")
     finally:
         conn.close()
 

@@ -94,6 +94,13 @@
         .footer{text-align:center;padding:2rem;margin-top:1rem;border-top:1px solid var(--bdr);color:var(--t3);font-size:.78rem}
         .footer a{color:var(--ac);text-decoration:none}
         .loading{text-align:center;padding:3rem;color:var(--t3)}
+        .map-bc{display:flex;align-items:center;gap:.4rem;margin-bottom:.8rem;font-size:.82rem}
+        .bc-item{color:var(--t2);padding:.2rem .5rem;border-radius:4px}
+        .bc-link{cursor:pointer;color:var(--ac);transition:background .2s}
+        .bc-link:hover{background:rgba(56,189,248,.1)}
+        .bc-sep{color:var(--t3)}
+        .bc-cur{color:var(--t1);font-weight:600}
+        .notice-bar{max-width:900px;margin:1rem auto 0;padding:.6rem 1.2rem;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:8px;color:var(--amb);font-size:.82rem;text-align:center}
 
         /* Responsive: Tablet */
         @media(max-width:1024px){
@@ -159,6 +166,7 @@
             <span id="updateTime">加载中...</span>
         </div>
     </div>
+    <div class="notice-bar">非官方，数据爬取自比亚迪闪充App，难免有波动，仅供参考。<br>数据覆盖尚不完全，正在持续优化采集范围，敬请关注后续更新。</div>
     <div class="container">
         <div class="cards-top" id="cardsTop">
             <div class="hero" style="opacity:.3;height:180px"></div>
@@ -170,6 +178,7 @@
         </div>
         <div class="cb" style="margin-bottom:1.5rem">
             <h3><span class="di" style="background:var(--ac)"></span> 全国站点分布</h3>
+            <div id="mapBreadcrumb" class="map-bc"><span class="bc-item bc-cur">全国</span></div>
             <div id="chinaMap" style="width:100%;height:460px"></div>
         </div>
         <div class="g2">
@@ -202,8 +211,10 @@
     </div>
     <div class="footer">
         <p>比亚迪闪充站全国追踪 · 数据每日自动采集</p>
+        <p style="margin-top:.3rem">本站总访问量 <span id="busuanzi_value_site_pv"></span> 次</p>
         <p style="margin-top:.3rem">Powered by Flask + ECharts + Chart.js</p>
     </div>
+    <script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 
 <script>
 let cityData=[], allStations=[], currentType='all', sortCol='station_count', sortDir='desc';
@@ -239,18 +250,17 @@ async function loadData(){
         renderSummary(summary);
         renderCityTable(cities);
         renderTrend(growth);
-        renderMap(cities);
+        renderMap();
         if(summary.latest) document.getElementById('updateTime').textContent='数据更新于 '+summary.latest.snapshot_date;
     }catch(e){
         console.error(e);
-        document.getElementById('summaryCards').innerHTML='<div class="loading" style="grid-column:1/-1">数据加载失败</div>';
+        document.getElementById('cardsTop').innerHTML='<div class="loading">数据加载失败</div>';
     }
 }
 
 function renderSummary(data){
     if(!data.latest){document.getElementById('cardsTop').innerHTML='<div class="loading">暂无数据</div>';return;}
     const s=data.latest;
-    // Extract type breakdown counts
     const tb=data.type_breakdown||[];
     const zzz=tb.find(t=>t.station_type==='站中站');
     const gss=tb.find(t=>t.station_type==='高速站');
@@ -272,76 +282,209 @@ function renderSummary(data){
     document.querySelectorAll('.cu').forEach(el=>countUp(el,parseInt(el.dataset.t)||0));
 }
 
-function renderTypeBreakdown(types){
-    if(!types||!types.length)return;
-    const ic={'站中站':'🏢','高速站':'🛣️'};
-    const cl={'站中站':'ts','高速站':'th'};
-    document.getElementById('typeGrid').innerHTML=types.map(t=>`
-        <div class="tchip ${cl[t.station_type]||'tn'}"><div class="ti">${ic[t.station_type]||'📍'}</div>
-        <div><div class="tv cu" data-t="${t.count}">0</div><div class="tl">${t.station_type}</div></div></div>`).join('');
-    document.querySelectorAll('#typeGrid .cu').forEach(el=>countUp(el,parseInt(el.dataset.t)||0,800));
+// === Map with three-level drill-down ===
+let mapChart=null, mapLevel='china', mapProvince=null, mapCity=null;
+const geoCache={};
+
+function getFilteredStations(){
+    let filtered=allStations;
+    if(currentType==='高速站') filtered=allStations.filter(s=>(s.attribute_tags||'').includes('高速'));
+    else if(currentType==='站中站') filtered=allStations.filter(s=>!(s.attribute_tags||'').includes('高速'));
+    return filtered;
 }
 
-let mapChart=null, mapStations=[];
-
-function renderMap(cities){
-    mapChart=echarts.init(document.getElementById('chinaMap'));
-    fetch('/api/stations').then(r=>r.json()).then(stations=>{
-        mapStations=stations;
-        updateMap();
-    }).catch(()=>{
-        mapChart.setOption({geo:{map:'china',roam:true,zoom:1.2,
-            itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f'},
-            emphasis:{itemStyle:{areaColor:'#1a2744'}}}});
+function getProvinceCounts(stations){
+    const pc={};
+    stations.forEach(s=>{
+        const p=s.province||'';
+        if(p) pc[p]=(pc[p]||0)+1;
     });
+    return pc;
+}
+
+function getCityCounts(stations, province){
+    const cc={};
+    stations.forEach(s=>{
+        if((s.province||'')===province){
+            const c=s.city||'未知';
+            cc[c]=(cc[c]||0)+1;
+        }
+    });
+    return cc;
+}
+
+async function loadProvinceGeo(province){
+    if(geoCache[province]) return geoCache[province];
+    try{
+        const map=await fetch('/static/maps/province_map.json').then(r=>r.json());
+        const file=map[province.replace(/省|市|自治区|壮族|回族|维吾尔/g,'')]||map[province];
+        if(!file) return null;
+        const geo=await fetch('/static/maps/'+file).then(r=>r.json());
+        const mapName='province_'+province;
+        echarts.registerMap(mapName, geo);
+        geoCache[province]={name:mapName, geo};
+        return geoCache[province];
+    }catch(e){
+        console.warn('Failed to load province geo:', province, e);
+        return null;
+    }
+}
+
+function renderMap(){
+    mapChart=echarts.init(document.getElementById('chinaMap'));
+    showChinaMap();
     window.addEventListener('resize',()=>mapChart&&mapChart.resize());
 }
 
-function updateMap(){
-    if(!mapChart)return;
-    let filtered=mapStations;
-    if(currentType==='高速站'){
-        filtered=mapStations.filter(s=>(s.attribute_tags||'').includes('高速'));
-    }else if(currentType==='站中站'){
-        filtered=mapStations.filter(s=>!(s.attribute_tags||'').includes('高速'));
-    }
+function showChinaMap(){
+    mapLevel='china'; mapProvince=null; mapCity=null;
+    updateBreadcrumb();
+    const filtered=getFilteredStations();
+    const pc=getProvinceCounts(filtered);
+    const provs=['北京','天津','河北','山西','内蒙古','辽宁','吉林','黑龙江','上海','江苏','浙江','安徽','福建','江西','山东','河南','湖北','湖南','广东','广西','海南','重庆','四川','贵州','云南','西藏','陕西','甘肃','青海','宁夏','新疆','台湾','香港','澳门'];
+    const provData=provs.map(name=>{
+        const v=pc[name]||pc[name+'省']||pc[name+'市']||pc[name+'自治区']||
+                pc[name+'壮族自治区']||pc[name+'回族自治区']||pc[name+'维吾尔自治区']||0;
+        return {name, value:v};
+    });
     const points=filtered.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
     mapChart.setOption({
-        tooltip:{trigger:'item',formatter:p=>p.name||''},
+        tooltip:{trigger:'item',backgroundColor:'#1e293b',borderColor:'rgba(56,189,248,.3)',borderWidth:1,textStyle:{color:'#f1f5f9'},
+            formatter:function(p){
+                if(p.seriesType==='map') return '<b>'+p.name+'</b><br/>闪充站 '+(p.value||0)+' 座<br/><span style="color:#94a3b8;font-size:12px">点击查看详情</span>';
+                return p.name||'';
+            }},
         geo:{map:'china',roam:true,zoom:1.2,
             scaleLimit:{min:1,max:20},
             itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
-            regions:[],
             emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
         series:[{
+            type:'map',geoIndex:0,data:provData,tooltip:{show:true}
+        },{
             type:'scatter',coordinateSystem:'geo',
-            data:points,
-            symbolSize:2,
+            data:points, symbolSize:2,
             itemStyle:{color:currentType==='高速站'?'#fbbf24':'#38bdf8',opacity:.6},
             emphasis:{itemStyle:{color:'#fbbf24',opacity:1,shadowBlur:10}}
         }]
     },true);
+    mapChart.off('click');
+    mapChart.on('click','series.map',function(p){
+        if(p.name && p.value>0) drillToProvince(p.name);
+    });
 }
 
-function renderDonut(summary){
-    const s=summary.latest;if(!s)return;
-    const ch=echarts.init(document.getElementById('donutChart'));
-    ch.setOption({
-        tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
-        legend:{bottom:10,textStyle:{color:'#94a3b8',fontSize:12},icon:'circle',itemGap:16},
-        series:[{type:'pie',radius:['45%','72%'],center:['50%','45%'],avoidLabelOverlap:true,
-            itemStyle:{borderRadius:6,borderColor:'#111827',borderWidth:3},
-            label:{show:true,color:'#94a3b8',fontSize:12,formatter:'{b}\n{d}%'},
-            emphasis:{label:{show:true,fontSize:14,fontWeight:'bold'},itemStyle:{shadowBlur:20,shadowColor:'rgba(56,189,248,.3)'}},
-            data:[
-                {value:s.total_flash_connectors||0,name:'闪充桩',itemStyle:{color:'#a78bfa'}},
-                {value:s.total_fast_connectors||0,name:'快充桩',itemStyle:{color:'#38bdf8'}},
-                {value:s.total_slow_connectors||0,name:'慢充桩',itemStyle:{color:'#64748b'}},
-                {value:s.total_super_connectors||0,name:'超充桩',itemStyle:{color:'#fbbf24'}},
-            ].filter(d=>d.value>0)
-        }]
+async function drillToProvince(provName){
+    const fullNames=new Set();
+    allStations.forEach(s=>{if(s.province&&s.province.startsWith(provName)) fullNames.add(s.province)});
+    const fullProv=fullNames.values().next().value||provName;
+
+    const cached=await loadProvinceGeo(provName);
+    if(!cached){showChinaMap();return;}
+
+    mapLevel='province'; mapProvince=fullProv; mapCity=null;
+    updateBreadcrumb();
+
+    const filtered=getFilteredStations();
+    const cc=getCityCounts(filtered, fullProv);
+    const provStations=filtered.filter(s=>(s.province||'')===fullProv);
+    const points=provStations.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+
+    const cityData2=cached.geo.features.map(f=>{
+        const cname=f.properties.name||'';
+        let val=cc[cname]||0;
+        if(!val){
+            for(const [k,v] of Object.entries(cc)){
+                if(k.startsWith(cname)||cname.startsWith(k)){val=v;break;}
+            }
+        }
+        return {name:cname, value:val};
     });
-    window.addEventListener('resize',()=>ch.resize());
+
+    mapChart.setOption({
+        tooltip:{trigger:'item',backgroundColor:'#1e293b',borderColor:'rgba(56,189,248,.3)',borderWidth:1,textStyle:{color:'#f1f5f9'},
+            formatter:function(p){
+                if(p.seriesType==='map') return '<b>'+p.name+'</b><br/>闪充站 '+(p.value||0)+' 座';
+                return p.name||'';
+            }},
+        geo:{map:cached.name,roam:true,zoom:1.0,
+            scaleLimit:{min:0.5,max:20},
+            itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
+            emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:true,color:'#fff',fontSize:10}}},
+        series:[{
+            type:'map',geoIndex:0,data:cityData2,tooltip:{show:true}
+        },{
+            type:'scatter',coordinateSystem:'geo',
+            data:points, symbolSize:3,
+            itemStyle:{color:currentType==='高速站'?'#fbbf24':'#38bdf8',opacity:.7},
+            emphasis:{itemStyle:{color:'#fbbf24',opacity:1,shadowBlur:10}}
+        }]
+    },true);
+    mapChart.off('click');
+    mapChart.on('click','series.map',function(p){
+        if(p.name && p.value>0) drillToCity(fullProv, p.name);
+    });
+}
+
+function drillToCity(province, cityName){
+    mapLevel='city'; mapCity=cityName;
+    updateBreadcrumb();
+
+    const filtered=getFilteredStations();
+    const cityStations=filtered.filter(s=>{
+        if((s.province||'')!==province) return false;
+        const sc=s.city||'';
+        return sc===cityName || sc.startsWith(cityName) || cityName.startsWith(sc);
+    });
+
+    if(!cityStations.length){showChinaMap();return;}
+
+    let minLat=90,maxLat=0,minLng=180,maxLng=0;
+    cityStations.forEach(s=>{
+        minLat=Math.min(minLat,s.lat);maxLat=Math.max(maxLat,s.lat);
+        minLng=Math.min(minLng,s.lng);maxLng=Math.max(maxLng,s.lng);
+    });
+    const cLat=(minLat+maxLat)/2, cLng=(minLng+maxLng)/2;
+    const span=Math.max(maxLat-minLat, maxLng-minLng, 0.05);
+    const zoom=Math.min(14, Math.max(6, 3/span));
+
+    const points=cityStations.map(s=>({name:s.station_name,value:[s.lng,s.lat,1]}));
+
+    const cached=geoCache[province.replace(/省|市|自治区|壮族|回族|维吾尔/g,'')]||geoCache[province];
+    const mapName=cached?cached.name:'china';
+
+    mapChart.setOption({
+        tooltip:{trigger:'item',backgroundColor:'#1e293b',borderColor:'rgba(56,189,248,.3)',borderWidth:1,textStyle:{color:'#f1f5f9'},
+            formatter:function(p){return p.name||'';}},
+        geo:{map:mapName,roam:true,center:[cLng,cLat],zoom:zoom,
+            scaleLimit:{min:1,max:50},
+            itemStyle:{areaColor:'#111827',borderColor:'#1e3a5f',borderWidth:1},
+            emphasis:{itemStyle:{areaColor:'#1a2744'},label:{show:false}}},
+        series:[{
+            type:'map',geoIndex:0,data:[],tooltip:{show:false}
+        },{
+            type:'scatter',coordinateSystem:'geo',
+            data:points, symbolSize:6,
+            itemStyle:{color:currentType==='高速站'?'#fbbf24':'#38bdf8',opacity:.8},
+            emphasis:{itemStyle:{color:'#fbbf24',opacity:1,shadowBlur:10}}
+        }]
+    },true);
+    mapChart.off('click');
+}
+
+function updateBreadcrumb(){
+    const el=document.getElementById('mapBreadcrumb');
+    if(!el)return;
+    let html='<span class="bc-item bc-link" onclick="showChinaMap()">全国</span>';
+    if(mapProvince){
+        const short=mapProvince.replace(/省|市|自治区|壮族|回族|维吾尔/g,'');
+        if(mapCity){
+            html+=' <span class="bc-sep">›</span> <span class="bc-item bc-link" onclick="drillToProvince(\''+short+'\')">'+short+'</span>';
+            html+=' <span class="bc-sep">›</span> <span class="bc-item bc-cur">'+mapCity+'</span>';
+        }else{
+            html+=' <span class="bc-sep">›</span> <span class="bc-item bc-cur">'+short+'</span>';
+        }
+    }
+    el.innerHTML=html;
 }
 
 function renderTrend(growth){
@@ -379,10 +522,7 @@ function renderCityTable(cities){
 }
 
 function sortAndRender(){
-    let filtered=currentType==='all'?[...cityData]:cityData.filter(c=>{
-        // filter by station type if we have station-level data
-        return true; // fallback: show all if no station-level filtering available
-    });
+    let filtered=[...cityData];
     const q=document.getElementById('citySearch').value.toLowerCase();
     if(q)filtered=filtered.filter(c=>c.city.toLowerCase().includes(q));
     if(sortCol==='rank'||sortCol==='city'){
@@ -415,7 +555,9 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
         btn.classList.add('active');
         currentType=btn.dataset.type;
         sortAndRender();
-        updateMap();
+        if(mapLevel==='china') showChinaMap();
+        else if(mapLevel==='province'&&mapProvince) drillToProvince(mapProvince.replace(/省|市|自治区|壮族|回族|维吾尔/g,''));
+        else if(mapLevel==='city'&&mapProvince&&mapCity) drillToCity(mapProvince,mapCity);
     });
 });
 
